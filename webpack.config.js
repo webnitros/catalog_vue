@@ -1,5 +1,6 @@
 var path = require('path')
 var webpack = require('webpack')
+var apiPath = process.env.NODE_ENV === 'production' ? 'server' : 'mock'
 
 module.exports = {
   entry: {
@@ -46,7 +47,8 @@ module.exports = {
   },
   resolve: {
     alias: {
-      'vue$': 'vue/dist/vue.esm.js'
+      'vue$': 'vue/dist/vue.esm.js',
+      'api-client': path.resolve(__dirname, './src/api/'+apiPath+'/index.js'),
     },
     extensions: ['*', '.js', '.vue', '.json']
   },
