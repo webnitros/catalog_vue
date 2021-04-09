@@ -1,0 +1,6 @@
+.scroll-area {
+  position: relative;
+}
+.scroll-area {
+  max-height: 300px;
+}

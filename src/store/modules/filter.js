@@ -1,205 +1,241 @@
 import client from 'api-client'
 
+const FilterFactory = require('./../factory/index')
+const HandlerFactory = require('./../Handler/index')
 
-function escapeHtml (string) {
-  let i = 0
-  var specialChars = {'%': '%25', '+': '%2B', '%252C': ',', '%252B': ' ', '%2B': ' '}
-  for (i in specialChars) {
-    if (specialChars.hasOwnProperty(i) && string.indexOf(i) !== -1) {
-      string = string.replace(new RegExp('\\' + i, 'g'), specialChars[i])
-    }
-  }
-  return string
+function updateFilters (commit, getters, response) {
+    let filters = {}
+    response.map(function (value, index) {
+        filters[value.field] = FilterFactory.createFilter(value.type, {
+            type: value.type,
+            field: value.field,
+            options: value.options, //
+            search: value.search,
+            values: value.values,
+            selected: value.selected,
+            expand_list: value.expand_list,
+            noRank: value.noRank,
+        })
+        return true
+    })
+    commit('updateFilters', filters)
 }
 
 export default {
-  actions: {
-    initFilters ({commit}, searchParams) {
-      commit('updateSearchParams', searchParams)
-    },
-    async fetchFilters ({commit, getters, dispatch}) {
-      client.fetchFilters().then((response) => {
-        let ranks = {}
-        response.map(function (value, index) {
-          value.rank = index
-          ranks[value.field] = value.rank
-          if (!value.open) {
-            value.open = false
-          }
-          if (value.show_three) {
-            value.open = true
-          }
-          return value
-        })
-        commit('updateRanks', ranks)
-        commit('updateFilters', response)
-        commit('updateFilterSelected', getters.allSearchParams)
-        commit('rankFilters') // Сортировка фильтров при входе на страницу
-      })
-    },
-    async fetchSuggestions ({commit, getters, dispatch}, searchParams) {
-      client.fetchSuggestions().then((response) => {
-        commit('updateSuggestions', response)
-      })
-    },
-    fetchSelected ({commit, state, getters, dispatch}, field) {
-      const index = state.selected.findIndex(item => item.field === field)
-      if (index !== -1) {
-        return state.selected[index].selected
-      }
-      return []
-    },
-  },
-  mutations: {
-    // Меняем порядок фильтров после нажатия на кнопку показать
-    rankFilters (state) {
-      let filters = state.filters.map(function (value) {
-        const rank = state.ranks[value.field]
-        if (value.noRank) {
-          value.rank = rank
-        } else {
-          if (state.selected.findIndex(item => item.field === value.field) !== -1) {
-            value.rank = 4
-          } else {
-            value.rank = rank
-          }
-        }
-        return value
-      })
-      state.filters = filters
-    },
-    updateSearchParams (state, searchParams) {
-      if (Object.keys(searchParams).length === 0) {
-        searchParams = state.resetParams.data
-      }
-      state.searchParams = searchParams
-    },
-    updateRanks (state, ranks) {
-      state.ranks = ranks
-    },
-    updateFilters (state, filters) {
-      state.filters = filters
-    },
-    updateSuggestions (state, filters) {
-      state.suggestions = filters
-    },
-    updateSelected (state, data) {
-      let selected = state.selected
-      const index = selected.findIndex(item => item.field === data.field)
-      if (index !== -1) {
-        if (data.selected.length === 0) {
-          selected = selected.filter(item => item.field !== data.field)
-        } else {
-          selected[index]['selected'] = data.selected
-        }
-      } else {
-        selected.push({
-          field: data.field,
-          selected: data.selected,
-        })
-      }
-      state.selected = selected
-    },
-    updateFilterOption (state, data) {
-      state.filters.map(function (value, key) {
-        if (data.all || data.field === value.field) {
-          value[data.key] = data.value
-        }
-      })
-    },
-    updateFilterSelected (state, searchParams) {
+    actions: {
+        initFilters ({commit, dispatch}, searchParams) {
+            commit('setHandler', HandlerFactory.createHandler('Form', {
+                params: searchParams,
+            }))
+            commit('updateSearchParams', searchParams)
+            searchParams['build'] = true
+            dispatch('fetchProducts', searchParams)
+        },
 
-      let params = []
-      state.filters.map(function (value, key) {
-        let values = searchParams[value['field']]
-        if (values) {
-          let selected = []
-          let tmp = escapeHtml(values)
-          tmp = tmp.split(',')
-          let type = value['type']
-          switch (type) {
-            case 'slider':
-            case 'boolean':
-              selected = tmp.map(function (val) {
-                return parseInt(val)
-              })
-              break
-            default:
-              selected = tmp
-              break
-          }
+        async fetchProducts ({commit, getters, dispatch}, searchParams = {}) {
+            commit('updateLoading', true)
+            searchParams['uri'] = searchParams['uri'] ? searchParams['uri'] : document.location.pathname
+            client.fetchProducts(searchParams).then((response) => {
+                if (!response.success) {
+                    alert(response.message)
+                    commit('updateLoading', false)
+                    return false
+                }
 
-          // При первой иниализации заполням значения по умолчанию
-          if (!state.initFilers) {
-            var valuesDefault = selected.map(function (val) {
-              return val
+                if (typeof ($) !== 'undefined') {
+                    // Оповещение события
+                    $(document).trigger('mse2_load', response)
+                }
+
+                if (response.data.filters) {
+                    updateFilters(commit, getters,response.data.filters)
+                }
+
+                if (response.data.units) {
+                    commit('updateUnits', response.data.units)
+                }
+
+                let suggestions = response.data.suggestions || null
+                if (suggestions) {
+                    commit('updateSuggestions', suggestions)
+                }
+
+                if (response.data.elastic) {
+                    commit('updateElastic', response.data.elastic)
+                }
+
+                if (response.data.results) {
+                    commit('updateProducts', response.data.results)
+                }
+
+                commit('updateTotal', response.data.total)
+                commit('updateLoading', false)
             })
-            state.selectedDefault.push({
-              field: value['field'],
-              selected: valuesDefault
+        },
+
+        setURI ({commit}, uri) {
+            commit('updateURI', uri)
+        },
+
+        submitFilters ({commit, getters, dispatch}) {
+            commit('updateLoading', true)
+
+            // Блокируем отправку
+            if (!getters.isInitFilers) {
+                return false;
+            }
+
+            // Обработка наших параметров
+            const Handler = getters.getHandler
+
+            let params = Handler.prepare(getters.getUri,getters.allFilters)
+
+            // Обновляем выбранные параметры
+            commit('updateFilterParams', params)
+
+            dispatch('fetchProducts', params)
+
+        }
+    },
+    mutations: {
+        updateURI (state, uri) {
+            state.uri = uri
+        },
+        updateInitFilers (state, value) {
+            state.initFilers = value
+        },
+        setHandler (state, handler) {
+            state.handler = handler
+        },
+        updateSearchParams (state, searchParams) {
+            state.searchParams = searchParams
+        },
+        updateFilters (state, filters) {
+            state.filters = filters
+        },
+        updateUnits (state, units) {
+            state.units = units
+        },
+
+        // Products
+        updateProducts (state, filters) {
+            state.products = filters
+        },
+        updateTotal (state, total) {
+            state.total = total
+        },
+        updateLoading (state, loading) {
+            state.loading = loading
+        },
+        updateLimit (state, limit) {
+            state.limit = limit
+        },
+        updateElastic (state, limit) {
+            state.elastic = limit
+        },
+
+        /**
+         * Обновит количество товаров у значений в фильтрах
+         * @param state
+         * @param suggestions
+         */
+        updateSuggestions (state, suggestions) {
+            Object.keys(state.filters).map(function (filed, index) {
+                let filter = state.filters[filed]
+                let suggestion = suggestions[filed]
+                filter.updateSuggestion(suggestion)
             })
-          }
-          params.push({
-            field: value['field'],
-            selected: selected
-          })
+        },
+
+        /**
+         * Обновит количество товаров у значений в фильтрах
+         * @param state
+         * @param params
+         */
+        updateFilterParams (state, params) {
+            state.params = params
         }
-      })
-      state.selected = params
-      if (!state.initFilers) {
-        state.initFilers = true
-      }
-    }
-  },
-  state: {
-    initFilers: false,
-    searchParams: {},
-    suggestions: {},
-    filters: [],
-    results: [],
-    pagination: [],
-    ranks: {},
-    sort: 0,
-    selected: [],
-    selectedDefault: [],
-    resetParams: {
-      data: {
-        availability: '1'
-      }
     },
-    limit: 0,
-  },
-  getters: {
-    allSuggestions (state) {
-      return state.suggestions
+    state: {
+        units: [],
+        handler: null,
+        uri: '/',
+        initFilers: false,
+        elastic: {},
+        searchParams: {},
+        parent: 6,
+        filters: [],
+        results: [],
+        pagination: [],
+        selected: [],
+
+        // Products
+        loading: false,
+        products: [],
+        total: 0,
+        limit: 30,
+        params: {},
     },
-    allFilters (state) {
-      return state.filters
-    },
-    allSelected (state) {
-      return state.selected
-    },
-    isSelected (state) {
-      return (state.selected.length > 0)
-    },
-    enableBtnReset (state) {
-      return (state.selected.filter(function (item) {
-        if (item.field !== 'availability') {
-          return true
+    getters: {
+        isInitFilers (state) {
+            return state.initFilers
+        },
+        getHandler (state) {
+            return state.handler
+        },
+        allElastic (state) {
+            return state.elastic
+        },
+        allUnits (state) {
+            return state.units
+        },
+        allFilters (state) {
+            let filters = []
+            const all = state.filters
+            Object.keys(all).map(function (field, index) {
+                let Filter = all[field]
+                filters.push(Filter)
+            })
+            return filters
+        },
+        allParams (state) {
+            return state.params
+        },
+        isSelected (state) {
+            return (state.selected.length > 0)
+        },
+        enableBtnReset (state) {
+            return (state.selected.filter(function (item) {
+                if (item.field !== 'availability') {
+                    return true
+                }
+            }).length > 0)
+        },
+        allSearchParams (state) {
+            return state.searchParams
+        },
+        allSortsUnits (state) {
+            return state.sorts_units
+        },
+        allCategories (state) {
+            return state.categories
+        },
+
+        getUri (state) {
+            return state.uri
+        },
+
+        allProducts (state) {
+            return state.products
+        },
+        isLoading (state) {
+            return state.loading
+        },
+        totalProducts (state) {
+            return state.total
+        },
+        getLimit (state) {
+            return state.limit
         }
-      }).length > 0)
-    },
-    allSelectedDefault (state) {
-      return state.selectedDefault
-    },
-    allSearchParams (state) {
-      return state.searchParams
-    },
-    allResetParams (state) {
-      return state.resetParams.data
-    },
-    filtersCount (state, getters) {
-      return getters.validFilters.length
     }
-  }
 }

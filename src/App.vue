@@ -1,19 +1,16 @@
 <template>
-      <div class="container">
-        <Catalog></Catalog>
+      <div>
+          <form-filter></form-filter>
       </div>
-
 </template>
 <script>
 import css from "./assets/css/style.css";
-import Catalog from './views/Catalog.vue'
-import { func } from './components/mixins/func'
+import FormFilter from './components/Form/Filter.vue'
 
 export default {
-  mixins:[ func ],
   name: 'App',
   components: {
-    Catalog
+      FormFilter
   }
 }
 </script>
